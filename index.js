@@ -1,13 +1,19 @@
 import { Client, GatewayIntentBits } from "discord.js";
+import axios from "axios";
 import dotenv from "dotenv";
 dotenv.config();
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
+  intents: [
+    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.GuildMessages, 
+    GatewayIntentBits.MessageContent // Required to read !start/!stop
+  ]
 });
 
 let running = false;
 
+// Generates 4-letter names using ONLY lowercase letters
 function generateName() {
   const letters = "abcdefghijklmnopqrstuvwxyz";
   let name = "";
@@ -17,9 +23,35 @@ function generateName() {
   return name;
 }
 
-// 🚫 Discord does NOT allow username availability checks
+// Logic based on suenerve's DSV (pomelo-attempt)
 async function checkAvailability(name) {
-  return "UNKNOWN"; // placeholder
+  const url = "https://discord.com/api/v9/users/@me/pomelo-attempt";
+  
+  try {
+    const response = await axios.post(
+      url,
+      { username: name },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Origin": "https://discord.com/",
+          // WARNING: This endpoint usually requires a USER TOKEN, not a bot token
+          "Authorization": process.env.DISCORD_TOKEN, 
+        },
+      }
+    );
+
+    // If 'taken' is true, it's unavailable. If false, it's available.
+    return response.data.taken ? "❌ TAKEN" : "✅ AVAILABLE";
+
+  } catch (error) {
+    if (error.response) {
+      if (error.response.status === 429) return "⚠️ RATE LIMITED (Slow down)";
+      if (error.response.status === 401) return "🚫 INVALID TOKEN (User Token Required)";
+      return `❓ ERROR (${error.response.status})`;
+    }
+    return "🌐 CONNECTION ERROR";
+  }
 }
 
 async function loop(channel) {
@@ -27,29 +59,33 @@ async function loop(channel) {
     const name = generateName();
     const status = await checkAvailability(name);
 
-    await channel.send(`🔤 **${name}** → ${status}`);
-    await new Promise(r => setTimeout(r, 5000)); // 5 sec delay
+    const timestamp = new Date().toLocaleTimeString();
+    await channel.send(`[${timestamp}] 🔤 **${name}** → ${status}`);
+    
+    // 20-second delay as requested
+    await new Promise(r => setTimeout(r, 20000)); 
   }
 }
 
 client.on("messageCreate", async (msg) => {
-  if (!msg.content.startsWith("!")) return;
+  if (msg.author.bot || !msg.content.startsWith("!")) return;
 
   if (msg.content === "!start") {
-    if (running) return msg.reply("Already running.");
+    if (running) return msg.reply("Check is already running.");
     running = true;
-    msg.reply("Started generating usernames.");
+    msg.reply("🚀 Started checking 4-letter usernames (20s delay).");
     loop(msg.channel);
   }
 
   if (msg.content === "!stop") {
     running = false;
-    msg.reply("Stopped.");
+    msg.reply("🛑 Stopped checking.");
   }
 });
 
 client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}`);
+  console.log("Credit to suenerve for the DSV logic.");
 });
 
 client.login(process.env.DISCORD_TOKEN);
