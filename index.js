@@ -3,17 +3,27 @@ import axios from "axios";
 import dotenv from "dotenv";
 dotenv.config();
 
+// --- CONFIGURATION ---
+const TOKEN = process.env.DISCORD_TOKEN;
+const TARGET_CHANNEL_ID = process.env.CHANNEL_ID; // Replace with your channel ID
+const CHECK_DELAY = 20000; // 20 seconds
+// ---------------------
+
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds, 
-    GatewayIntentBits.GuildMessages, 
-    GatewayIntentBits.MessageContent // Required to read !start/!stop
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
   ]
 });
 
 let running = false;
 
-// Generates 4-letter names using ONLY lowercase letters
+/**
+ * Credits: suenerve (https://github.com/suenerve/DSV)
+ * Logic: Checks 4-letter (letters only) availability via pomelo-attempt
+ */
+
 function generateName() {
   const letters = "abcdefghijklmnopqrstuvwxyz";
   let name = "";
@@ -23,10 +33,8 @@ function generateName() {
   return name;
 }
 
-// Logic based on suenerve's DSV (pomelo-attempt)
 async function checkAvailability(name) {
   const url = "https://discord.com/api/v9/users/@me/pomelo-attempt";
-  
   try {
     const response = await axios.post(
       url,
@@ -35,22 +43,15 @@ async function checkAvailability(name) {
         headers: {
           "Content-Type": "application/json",
           "Origin": "https://discord.com/",
-          // WARNING: This endpoint usually requires a USER TOKEN, not a bot token
-          "Authorization": process.env.DISCORD_TOKEN, 
+          "Authorization": TOKEN, 
         },
       }
     );
-
-    // If 'taken' is true, it's unavailable. If false, it's available.
     return response.data.taken ? "❌ TAKEN" : "✅ AVAILABLE";
-
   } catch (error) {
-    if (error.response) {
-      if (error.response.status === 429) return "⚠️ RATE LIMITED (Slow down)";
-      if (error.response.status === 401) return "🚫 INVALID TOKEN (User Token Required)";
-      return `❓ ERROR (${error.response.status})`;
-    }
-    return "🌐 CONNECTION ERROR";
+    if (error.response?.status === 429) return "⚠️ RATE LIMITED";
+    if (error.response?.status === 401) return "🚫 AUTH ERROR (Check Token)";
+    return "❓ ERROR";
   }
 }
 
@@ -59,33 +60,32 @@ async function loop(channel) {
     const name = generateName();
     const status = await checkAvailability(name);
 
-    const timestamp = new Date().toLocaleTimeString();
-    await channel.send(`[${timestamp}] 🔤 **${name}** → ${status}`);
-    
-    // 20-second delay as requested
-    await new Promise(r => setTimeout(r, 20000)); 
+    await channel.send(`🔤 **${name}** → ${status}`);
+    await new Promise(r => setTimeout(r, CHECK_DELAY));
   }
 }
 
 client.on("messageCreate", async (msg) => {
-  if (msg.author.bot || !msg.content.startsWith("!")) return;
+  // Only respond in the specific channel defined at the top
+  if (msg.channel.id !== TARGET_CHANNEL_ID) return;
+  if (msg.author.bot) return;
 
   if (msg.content === "!start") {
-    if (running) return msg.reply("Check is already running.");
+    if (running) return msg.reply("Already running.");
     running = true;
-    msg.reply("🚀 Started checking 4-letter usernames (20s delay).");
+    msg.reply(`🚀 Started checking 4L names every ${CHECK_DELAY / 1000}s.`);
     loop(msg.channel);
   }
 
   if (msg.content === "!stop") {
     running = false;
-    msg.reply("🛑 Stopped checking.");
+    msg.reply("🛑 Stopped.");
   }
 });
 
 client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}`);
-  console.log("Credit to suenerve for the DSV logic.");
+  console.log(`Monitoring Channel: ${TARGET_CHANNEL_ID}`);
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(TOKEN);
